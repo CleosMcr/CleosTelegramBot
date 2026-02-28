@@ -117,6 +117,14 @@ try:
     sheet = client.open(SHEET_NAME).sheet1
     print(f"✅ Successfully connected to sheet: {SHEET_NAME}")
     
+    # Check if header row exists and has Total column
+    try:
+        headers = sheet.row_values(1)
+        if "Total" not in headers:
+            print("⚠️ 'Total' column not found in headers. Please add it manually.")
+    except:
+        print("Note: Could not read headers")
+    
 except Exception as e:
     print(f"❌ Failed to connect to Google Sheets: {e}")
     print("Make sure you've set up GOOGLE_CREDENTIALS_BASE64 or GOOGLE_CREDENTIALS in Render env vars")
@@ -138,6 +146,41 @@ def is_number(value):
         return True
     except:
         return False
+
+def calculate_total(user_data):
+    """Calculate total from all entries"""
+    try:
+        total = (
+            float(user_data.get("Cash", 0)) +
+            float(user_data.get("Card", 0)) +
+            float(user_data.get("Uber", 0)) +
+            float(user_data.get("Deliveroo", 0)) +
+            float(user_data.get("App", 0))
+        )
+        return round(total, 2)  # Round to 2 decimal places
+    except (ValueError, TypeError):
+        return 0
+
+def format_summary(user_data):
+    """Format a summary of all entries and total"""
+    cash = float(user_data.get("Cash", 0))
+    card = float(user_data.get("Card", 0))
+    uber = float(user_data.get("Uber", 0))
+    deliveroo = float(user_data.get("Deliveroo", 0))
+    app = float(user_data.get("App", 0))
+    total = calculate_total(user_data)
+    
+    summary = (
+        f"📊 *ENTRY SUMMARY*\n\n"
+        f"💰 Cash: £{cash:.2f}\n"
+        f"💳 Card: £{card:.2f}\n"
+        f"🚗 Uber: £{uber:.2f}\n"
+        f"🍔 Deliveroo: £{deliveroo:.2f}\n"
+        f"📱 App: £{app:.2f}\n"
+        f"─────────────\n"
+        f"💵 TOTAL: £{total:.2f}"
+    )
+    return summary
 
 # ==========================
 # CONVERSATION FLOW
@@ -202,6 +245,9 @@ async def app_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     staff_name = update.message.from_user.full_name
+    
+    # Calculate total
+    total = calculate_total(context.user_data)
 
     print("DEBUG: Writing to sheet:", [
         timestamp,
@@ -211,9 +257,11 @@ async def app_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["Uber"],
         context.user_data["Deliveroo"],
         context.user_data["App"],
+        total,  # Adding total to the row
     ])
 
     try:
+        # Append row with all values including total
         sheet.append_row([
             str(timestamp),
             str(staff_name),
@@ -222,8 +270,19 @@ async def app_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
             str(context.user_data["Uber"]),
             str(context.user_data["Deliveroo"]),
             str(context.user_data["App"]),
+            str(total),  # Total column
         ])
+        
+        # First confirm save was successful
         await update.message.reply_text("✅ All values saved successfully!")
+        
+        # Then display the summary with total
+        summary = format_summary(context.user_data)
+        await update.message.reply_text(
+            summary,
+            parse_mode='Markdown'  # This enables bold text formatting
+        )
+        
     except Exception as e:
         print(f"Error saving to sheet: {e}")
         await update.message.reply_text("❌ Error saving to Google Sheet. Check logs.")
